@@ -1,78 +1,73 @@
-#!/usr/bin/env python3
-"""Script for Tinker GUI chat client."""
+import sys
+import socket
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QTextEdit, QLineEdit, QPushButton, QWidget
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
-from socket import AF_INET, socket, SOCK_STREAM
-from threading import Thread
-import tkinter
+class ClientThread(QThread):
+    message_received = pyqtSignal(str)
 
-def receive():
-    """Handles receiving of messages."""
-    while True:
+    def __init__(self, client_socket):
+        super().__init__()
+        self.client_socket = client_socket
+
+    def run(self):
         try:
-            msg = client_socket.recv(BUFSIZ).decode("utf8")
-            msg_list.insert(tkinter.END, msg)
-        except OSError: # Possibly client has left the chat.
-            break
+            while True:
+                message = self.client_socket.recv(1024).decode()
+                self.message_received.emit(message)
 
-def send(event=None):   # event is passed by binders.
-    """Handles sending of messages."""
-    msg = my_msg.get()
-    my_msg.set("")  # Clears input field.
-    client_socket.send(bytes(msg, "utf8"))
-    if msg == "{exit}":
-        client_socket.close()
-        top.quit()
+        except Exception as e:
+            print(f"Error receiving messages: {e}")
 
-def on_closing(event=None):
-    """This function is to be called when the window is closed."""
-    my_msg.set("User has left the chat room unexpectedly")
-    send()
-    client_socket.close()
-    top.quit()
+        finally:
+            self.client_socket.close()
 
-top = tkinter.Tk()
-top.title("simpleChat")
+class ChatClientGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
 
-messages_frame = tkinter.Frame(top)
-my_msg = tkinter.StringVar()    # For the messages to be sent.
-my_msg.set("Type your message here.")
-scrollbar = tkinter.Scrollbar(messages_frame)   # To navigate through past messages.
+        self.setWindowTitle("Chat Client")
+        self.setGeometry(100, 100, 400, 300)
 
-msg_list = tkinter.Listbox(messages_frame, height=20, width=75, yscrollcommand=scrollbar.set)
-scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-msg_list.pack(side=tkinter.LEFT, fill=tkinter.BOTH)
-msg_list.pack()
+        self.text_area = QTextEdit()
+        self.text_area.setReadOnly(True)
 
-messages_frame.pack()
+        self.input_box = QLineEdit()
+        self.send_button = QPushButton("Send")
+        self.send_button.clicked.connect(self.send_message)
 
-def clear_text(event):
-    entry_field.delete(0, tkinter.END)
+        central_widget = QWidget()
+        central_layout = QVBoxLayout()
+        central_layout.addWidget(self.text_area)
+        central_layout.addWidget(self.input_box)
+        central_layout.addWidget(self.send_button)
+        central_widget.setLayout(central_layout)
 
-entry_field = tkinter.Entry(top, textvariable=my_msg)
-entry_field.bind("<Return>", send)
-entry_field.bind("<Button-1>", clear_text)
-entry_field.bind("<FocusIn>", clear_text)
+        self.setCentralWidget(central_widget)
 
-entry_field.pack()
-send_button = tkinter.Button(top, text="Send", command=send)
-send_button.pack()
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_thread = ClientThread(self.client_socket)
+        self.client_thread.message_received.connect(self.update_text_area)
 
-top.protocol("WM_DELETE_WINDOW", on_closing)
+        self.start_client()
 
-HOST = input('Enter host: ')
-PORT = input('Enter port: ')
+    def send_message(self):
+        message = self.input_box.text()
+        self.input_box.clear()
+        self.client_socket.send(message.encode())
 
-if not PORT:
-    PORT = 33000    # Default value.
-else:
-    PORT = int(PORT)
+    def update_text_area(self, message):
+        self.text_area.append(message)
 
-BUFSIZ = 1024
-ADDR = (HOST, PORT)
+    def start_client(self):
+        username = input("Enter your username: ")
+        self.client_socket.connect(('127.0.0.1', 5555))
+        self.client_socket.send(username.encode())
 
-client_socket = socket(AF_INET, SOCK_STREAM)
-client_socket.connect(ADDR)
+        self.client_thread.start()
 
-receive_thread = Thread(target=receive)
-receive_thread.start()
-tkinter.mainloop()  # Starts GUI execution.
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    client_gui = ChatClientGUI()
+    client_gui.show()
+    sys.exit(app.exec_())

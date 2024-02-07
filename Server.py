@@ -1,57 +1,63 @@
-#!/usr/bin/env python3
-"""Server for multithreaded (asynchronus) chat application."""
+import socket
+import threading
 
-from socket import AF_INET, socket, SOCK_STREAM
-from threading import Thread
+# Server configuration
+HOST = '0.0.0.0'
+PORT = 5555
 
-clients = {}
-addresses = {}
+# List to store connected clients
+clients = []
 
-HOST = ''
-PORT = 33000
-BUFSIZ = 1024
-ADDR = (HOST, PORT)
-SERVER = socket(AF_INET, SOCK_STREAM)
-SERVER.bind(ADDR)
+def handle_client(client_socket, username):
+    try:
+        while True:
+            message = client_socket.recv(1024).decode()
+            if not message:
+                break
 
-def accept_incoming_connections():
-    """Sets up handling for incoming clients."""
-    while True:
-        client, client_address = SERVER.accept()
-        print("%s:%s has connected." %client_address)
-        client.send(bytes("Welcome to simpleChat" + "Type your desired username and press enter!", "utf8"))
-        addresses[client] = client_address
-        Thread(target=handle_client, args=(client,)).start()
+            broadcast(f"{username}: {message}")
 
-def handle_client(client):  #Takes client socket as argument.
-    """Handles a single client connection."""
-    name = client.recv(BUFSIZ).decode("utf8")
-    welcome = 'Welcome %s! If you ever want to quit, type {exit} to exit.' % name
-    client.send(bytes(welcome, "utf8"))
-    msg = "%s has joined the chat!" % name
-    broadcast(bytes(msg, "utf8"))
-    clients[client] = name
-    while True:
-        msg = client.recv(BUFSIZ)
-        if msg != bytes("{exit}", "utf8"):
-            broadcast(msg, name+": ")
+    except Exception as e:
+        print(f"Error handling client {username}: {e}")
 
-        else:
-            client.send(bytes("{exit}", "utf8"))
-            client.close()
-            del clients[client]
-            broadcast(bytes("%s has left the chat." % name, "utf8"))
-            break
+    finally:
+        remove_client(client_socket)
 
-def broadcast(msg, prefix=""):  # prefix is for name identification.
-    """Broadcasts a message to all the clients."""
-    for sock in clients:
-        sock.send(bytes(prefix, "utf8")+msg)
+def broadcast(message):
+    for client in clients:
+        try:
+            client.send(message.encode())
+        except Exception as e:
+            print(f"Error broadcasting message: {e}")
+
+def remove_client(client_socket):
+    if client_socket in clients:
+        clients.remove(client_socket)
+        client_socket.close()
+
+def start_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((HOST, PORT))
+    server_socket.listen(5)
+
+    print(f"Server listening on {HOST}:{PORT}")
+
+    try:
+        while True:
+            client_socket, client_address = server_socket.accept()
+            print(f"Accepted connection from {client_address}")
+
+            username = client_socket.recv(1024).decode()
+            clients.append(client_socket)
+
+            client_handler = threading.Thread(target=handle_client, args=(client_socket, username))
+            client_handler.start()
+
+    except Exception as e:
+        print(f"Error in server: {e}")
+
+    finally:
+        server_socket.close()
 
 if __name__ == "__main__":
-    SERVER.listen(5)    # Listens for 5 connections at max.
-    print("Waiting for connection...")
-    ACCEPT_THREAD = Thread(target=accept_incoming_connections)
-    ACCEPT_THREAD.start()   # Starts the infinite loop.
-    ACCEPT_THREAD.join()
-    SERVER.close()
+    start_server()
